@@ -127,6 +127,22 @@ Run the test suite:
 go test -v .
 ```
 
+## CI/CD
+
+This project includes GitHub Actions workflows that automatically:
+
+- Run tests on every push and pull request
+- Run `go vet` and `go fmt` checks
+- Build Docker images
+- Push images to GitHub Container Registry (ghcr.io) on main/master branch
+
+### Using the Pre-built Docker Image
+
+```bash
+docker pull ghcr.io/returnearly/railway-image-updater:latest
+docker run -p 8080:8080 -e RAILWAY_API_TOKEN=your-token ghcr.io/returnearly/railway-image-updater:latest
+```
+
 ## Deployment
 
 ### Docker
