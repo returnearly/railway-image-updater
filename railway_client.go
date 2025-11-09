@@ -87,17 +87,30 @@ func (c *RailwayClient) doRequest(query string, variables map[string]interface{}
 	return graphqlResp.Data, nil
 }
 
-func (c *RailwayClient) GetServices(projectID, environmentID string) ([]Service, error) {
+func (c *RailwayClient) GetServices(environmentID string) ([]Service, error) {
 	query := `
-		query GetServices($projectId: String!, $environmentId: String!) {
-			services(projectId: $projectId, environmentId: $environmentId) {
-				edges {
-					node {
-						id
-						name
-						source {
-							image
+		query Environment($environmentId: String!) {
+			environment(id: $environmentId) {
+				id
+				name
+				projectId
+				serviceInstances(after: null) {
+					edges {
+						node {
+							id
+							serviceId
+							serviceName
+							source {
+								image
+								repo
+							}
 						}
+					}
+					pageInfo {
+						endCursor
+						hasNextPage
+						hasPreviousPage
+						startCursor
 					}
 				}
 			}
@@ -105,7 +118,6 @@ func (c *RailwayClient) GetServices(projectID, environmentID string) ([]Service,
 	`
 
 	variables := map[string]interface{}{
-		"projectId":     projectID,
 		"environmentId": environmentID,
 	}
 
@@ -115,17 +127,30 @@ func (c *RailwayClient) GetServices(projectID, environmentID string) ([]Service,
 	}
 
 	var result struct {
-		Services struct {
-			Edges []struct {
-				Node struct {
-					ID     string `json:"id"`
-					Name   string `json:"name"`
-					Source struct {
-						Image string `json:"image"`
-					} `json:"source"`
-				} `json:"node"`
-			} `json:"edges"`
-		} `json:"services"`
+		Environment struct {
+			ID               string `json:"id"`
+			Name             string `json:"name"`
+			ProjectID        string `json:"projectId"`
+			ServiceInstances struct {
+				Edges []struct {
+					Node struct {
+						ID          string `json:"id"`
+						ServiceID   string `json:"serviceId"`
+						ServiceName string `json:"serviceName"`
+						Source      struct {
+							Image string `json:"image"`
+							Repo  string `json:"repo"`
+						} `json:"source"`
+					} `json:"node"`
+				} `json:"edges"`
+				PageInfo struct {
+					EndCursor       string `json:"endCursor"`
+					HasNextPage     bool   `json:"hasNextPage"`
+					HasPreviousPage bool   `json:"hasPreviousPage"`
+					StartCursor     string `json:"startCursor"`
+				} `json:"pageInfo"`
+			} `json:"serviceInstances"`
+		} `json:"environment"`
 	}
 
 	if err := json.Unmarshal(data, &result); err != nil {
@@ -133,11 +158,11 @@ func (c *RailwayClient) GetServices(projectID, environmentID string) ([]Service,
 	}
 
 	services := make([]Service, 0)
-	for _, edge := range result.Services.Edges {
+	for _, edge := range result.Environment.ServiceInstances.Edges {
 		if edge.Node.Source.Image != "" {
 			services = append(services, Service{
-				ID:    edge.Node.ID,
-				Name:  edge.Node.Name,
+				ID:    edge.Node.ServiceID,
+				Name:  edge.Node.ServiceName,
 				Image: edge.Node.Source.Image,
 			})
 		}
@@ -184,8 +209,8 @@ func (c *RailwayClient) DeployService(serviceID, environmentID string) error {
 	return err
 }
 
-func (c *RailwayClient) UpdateServices(projectID, environmentID string, imagePrefixes []string, newVersion string) ([]string, error) {
-	services, err := c.GetServices(projectID, environmentID)
+func (c *RailwayClient) UpdateServices(environmentID string, imagePrefixes []string, newVersion string) ([]string, error) {
+	services, err := c.GetServices(environmentID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get services: %w", err)
 	}

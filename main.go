@@ -97,7 +97,7 @@ func handleUpdate(w http.ResponseWriter, r *http.Request, client *RailwayClient)
 	}
 
 	// Get services and update matching ones
-	updatedServices, err := client.UpdateServices(req.ProjectID, req.EnvironmentID, req.ImagePrefixes, req.NewVersion)
+	updatedServices, err := client.UpdateServices(req.EnvironmentID, req.ImagePrefixes, req.NewVersion)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(ErrorResponse{Error: fmt.Sprintf("Failed to update services: %v", err)})
