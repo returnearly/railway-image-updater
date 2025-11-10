@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 )
@@ -52,6 +53,9 @@ func (c *RailwayClient) doRequest(query string, variables map[string]interface{}
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
+	// Debug logging
+	log.Printf("GraphQL Request: %s", string(jsonData))
+
 	req, err := http.NewRequest("POST", railwayAPIURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -70,6 +74,9 @@ func (c *RailwayClient) doRequest(query string, variables map[string]interface{}
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
+
+	// Debug logging
+	log.Printf("GraphQL Response (Status %d): %s", resp.StatusCode, string(body))
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
@@ -171,17 +178,17 @@ func (c *RailwayClient) GetServices(environmentID string) ([]Service, error) {
 	return services, nil
 }
 
-func (c *RailwayClient) UpdateServiceImage(serviceID, newImage string) error {
-	query := `
-		mutation ServiceUpdate($serviceId: String!, $input: ServiceUpdateInput!) {
-			serviceUpdate(id: $serviceId, input: $input) {
-				id
-			}
+func (c *RailwayClient) UpdateServiceImage(serviceID, environmentID, newImage string) error {
+	// Step 1: Update the service instance image using ServiceInstanceUpdate
+	updateQuery := `
+		mutation ServiceInstanceUpdate($environmentId: String!, $serviceId: String!, $input: ServiceInstanceUpdateInput!) {
+			serviceInstanceUpdate(environmentId: $environmentId, serviceId: $serviceId, input: $input)
 		}
 	`
 
-	variables := map[string]interface{}{
-		"serviceId": serviceID,
+	updateVariables := map[string]interface{}{
+		"environmentId": environmentID,
+		"serviceId":     serviceID,
 		"input": map[string]interface{}{
 			"source": map[string]interface{}{
 				"image": newImage,
@@ -189,24 +196,61 @@ func (c *RailwayClient) UpdateServiceImage(serviceID, newImage string) error {
 		},
 	}
 
-	_, err := c.doRequest(query, variables)
-	return err
+	_, err := c.doRequest(updateQuery, updateVariables)
+	if err != nil {
+		return fmt.Errorf("failed to update service instance: %w", err)
+	}
+
+	// Step 2: Deploy the service using serviceInstanceDeploy
+	deployQuery := `
+		mutation ServiceInstanceDeploy($serviceId: String!, $environmentId: String!, $latestCommit: Boolean) {
+			serviceInstanceDeploy(serviceId: $serviceId, environmentId: $environmentId, latestCommit: $latestCommit)
+		}
+	`
+
+	deployVariables := map[string]interface{}{
+		"serviceId":     serviceID,
+		"environmentId": environmentID,
+		"latestCommit":  false,
+	}
+
+	_, err = c.doRequest(deployQuery, deployVariables)
+	if err != nil {
+		return fmt.Errorf("failed to deploy service instance: %w", err)
+	}
+
+	return nil
 }
 
-func (c *RailwayClient) DeployService(serviceID, environmentID string) error {
+func (c *RailwayClient) getProjectID(environmentID string) (string, error) {
 	query := `
-		mutation ServiceInstanceRedeploy($serviceId: String!, $environmentId: String!) {
-			serviceInstanceRedeploy(serviceId: $serviceId, environmentId: $environmentId)
+		query Environment($environmentId: String!) {
+			environment(id: $environmentId) {
+				projectId
+			}
 		}
 	`
 
 	variables := map[string]interface{}{
-		"serviceId":     serviceID,
 		"environmentId": environmentID,
 	}
 
-	_, err := c.doRequest(query, variables)
-	return err
+	data, err := c.doRequest(query, variables)
+	if err != nil {
+		return "", err
+	}
+
+	var result struct {
+		Environment struct {
+			ProjectID string `json:"projectId"`
+		} `json:"environment"`
+	}
+
+	if err := json.Unmarshal(data, &result); err != nil {
+		return "", fmt.Errorf("failed to parse project ID: %w", err)
+	}
+
+	return result.Environment.ProjectID, nil
 }
 
 func (c *RailwayClient) UpdateServices(environmentID string, imagePrefixes []string, newVersion string) ([]string, error) {
@@ -250,14 +294,11 @@ func (c *RailwayClient) UpdateServices(environmentID string, imagePrefixes []str
 			newImage = imagePrefix + ":" + newVersion
 		}
 
-		// Update the service
-		if err := c.UpdateServiceImage(service.ID, newImage); err != nil {
-			return updatedServices, fmt.Errorf("failed to update service %s: %w", service.Name, err)
-		}
+		log.Printf("Updating service %s from %s to %s", service.Name, service.Image, newImage)
 
-		// Deploy the service
-		if err := c.DeployService(service.ID, environmentID); err != nil {
-			return updatedServices, fmt.Errorf("failed to deploy service %s: %w", service.Name, err)
+		// Update the service and trigger deployment
+		if err := c.UpdateServiceImage(service.ID, environmentID, newImage); err != nil {
+			return updatedServices, fmt.Errorf("failed to update service %s: %w", service.Name, err)
 		}
 
 		updatedServices = append(updatedServices, service.Name)
