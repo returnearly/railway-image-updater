@@ -33,7 +33,10 @@ func main() {
 		log.Fatal("RAILWAY_API_TOKEN environment variable is required")
 	}
 
-	client := NewRailwayClient(token)
+	registryUser := os.Getenv("RAILWAY_DOCKER_REGISTRY_USER")
+	registryPass := os.Getenv("RAILWAY_DOCKER_REGISTRY_TOKEN")
+
+	client := NewRailwayClient(token, registryUser, registryPass)
 
 	http.HandleFunc("/update", func(w http.ResponseWriter, r *http.Request) {
 		handleUpdate(w, r, client)

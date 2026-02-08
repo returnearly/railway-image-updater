@@ -13,8 +13,10 @@ import (
 const railwayAPIURL = "https://backboard.railway.app/graphql/v2"
 
 type RailwayClient struct {
-	token      string
-	httpClient *http.Client
+	token                 string
+	httpClient            *http.Client
+	registryCredentialUser string
+	registryCredentialPass string
 }
 
 type GraphQLRequest struct {
@@ -30,15 +32,18 @@ type GraphQLResponse struct {
 }
 
 type Service struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Image string `json:"image"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Image       string `json:"image"`
+	NumReplicas int    `json:"numReplicas"`
 }
 
-func NewRailwayClient(token string) *RailwayClient {
+func NewRailwayClient(token string, registryUser string, registryPass string) *RailwayClient {
 	return &RailwayClient{
-		token:      token,
-		httpClient: &http.Client{},
+		token:                  token,
+		httpClient:             &http.Client{},
+		registryCredentialUser: registryUser,
+		registryCredentialPass: registryPass,
 	}
 }
 
@@ -107,6 +112,9 @@ func (c *RailwayClient) GetServices(environmentID string) ([]Service, error) {
 							id
 							serviceId
 							serviceName
+							latestDeployment {
+								meta
+							}
 							source {
 								image
 								repo
@@ -141,10 +149,13 @@ func (c *RailwayClient) GetServices(environmentID string) ([]Service, error) {
 			ServiceInstances struct {
 				Edges []struct {
 					Node struct {
-						ID          string `json:"id"`
-						ServiceID   string `json:"serviceId"`
-						ServiceName string `json:"serviceName"`
-						Source      struct {
+						ID               string `json:"id"`
+						ServiceID        string `json:"serviceId"`
+						ServiceName      string `json:"serviceName"`
+						LatestDeployment *struct {
+							Meta json.RawMessage `json:"meta"`
+						} `json:"latestDeployment"`
+						Source struct {
 							Image string `json:"image"`
 							Repo  string `json:"repo"`
 						} `json:"source"`
@@ -167,10 +178,12 @@ func (c *RailwayClient) GetServices(environmentID string) ([]Service, error) {
 	services := make([]Service, 0)
 	for _, edge := range result.Environment.ServiceInstances.Edges {
 		if edge.Node.Source.Image != "" {
+			replicas := resolveReplicaCount(edge.Node.ServiceName, edge.Node.LatestDeployment)
 			services = append(services, Service{
-				ID:    edge.Node.ServiceID,
-				Name:  edge.Node.ServiceName,
-				Image: edge.Node.Source.Image,
+				ID:          edge.Node.ServiceID,
+				Name:        edge.Node.ServiceName,
+				Image:       edge.Node.Source.Image,
+				NumReplicas: replicas,
 			})
 		}
 	}
@@ -178,7 +191,62 @@ func (c *RailwayClient) GetServices(environmentID string) ([]Service, error) {
 	return services, nil
 }
 
-func (c *RailwayClient) UpdateServiceImage(serviceID, environmentID, newImage string) error {
+// resolveReplicaCount extracts the replica count from the latest deployment meta.
+// It looks in meta.serviceManifest.deploy.multiRegionConfig for numReplicas values.
+// Falls back to 1 if no replica count is found.
+func resolveReplicaCount(serviceName string, latestDeployment *struct {
+	Meta json.RawMessage `json:"meta"`
+}) int {
+	replicas := 1
+
+	if latestDeployment == nil || latestDeployment.Meta == nil {
+		log.Printf("Replica count for %s: no deployment meta, defaulting to %d", serviceName, replicas)
+		return replicas
+	}
+
+	var meta map[string]interface{}
+	if err := json.Unmarshal(latestDeployment.Meta, &meta); err != nil {
+		log.Printf("Failed to parse meta JSON for %s: %v", serviceName, err)
+		return replicas
+	}
+
+	// Navigate: meta.serviceManifest.deploy.multiRegionConfig.<region>.numReplicas
+	serviceManifest, ok := meta["serviceManifest"].(map[string]interface{})
+	if !ok {
+		log.Printf("Replica count for %s: no serviceManifest, defaulting to %d", serviceName, replicas)
+		return replicas
+	}
+
+	deploy, ok := serviceManifest["deploy"].(map[string]interface{})
+	if !ok {
+		log.Printf("Replica count for %s: no deploy config, defaulting to %d", serviceName, replicas)
+		return replicas
+	}
+
+	multiRegionConfig, ok := deploy["multiRegionConfig"].(map[string]interface{})
+	if !ok {
+		log.Printf("Replica count for %s: no multiRegionConfig, defaulting to %d", serviceName, replicas)
+		return replicas
+	}
+
+	// Check all regions and use the first valid numReplicas found
+	for region, regionConfig := range multiRegionConfig {
+		regionMap, ok := regionConfig.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if numReplicas, ok := regionMap["numReplicas"].(float64); ok && numReplicas > 0 {
+			replicas = int(numReplicas)
+			log.Printf("Replica count for %s: region=%s numReplicas=%d", serviceName, region, replicas)
+			return replicas
+		}
+	}
+
+	log.Printf("Replica count for %s: no valid numReplicas in multiRegionConfig, defaulting to %d", serviceName, replicas)
+	return replicas
+}
+
+func (c *RailwayClient) UpdateServiceImage(serviceID, environmentID, newImage string, numReplicas int) error {
 	// Step 1: Update the service instance image using ServiceInstanceUpdate
 	updateQuery := `
 		mutation ServiceInstanceUpdate($environmentId: String!, $serviceId: String!, $input: ServiceInstanceUpdateInput!) {
@@ -186,14 +254,25 @@ func (c *RailwayClient) UpdateServiceImage(serviceID, environmentID, newImage st
 		}
 	`
 
+	input := map[string]interface{}{
+		"source": map[string]interface{}{
+			"image": newImage,
+		},
+		"numReplicas": numReplicas,
+	}
+
+	// Include registry credentials if configured
+	if c.registryCredentialUser != "" && c.registryCredentialPass != "" {
+		input["registryCredentials"] = map[string]interface{}{
+			"username": c.registryCredentialUser,
+			"password": c.registryCredentialPass,
+		}
+	}
+
 	updateVariables := map[string]interface{}{
 		"environmentId": environmentID,
 		"serviceId":     serviceID,
-		"input": map[string]interface{}{
-			"source": map[string]interface{}{
-				"image": newImage,
-			},
-		},
+		"input":         input,
 	}
 
 	_, err := c.doRequest(updateQuery, updateVariables)
@@ -294,10 +373,10 @@ func (c *RailwayClient) UpdateServices(environmentID string, imagePrefixes []str
 			newImage = imagePrefix + ":" + newVersion
 		}
 
-		log.Printf("Updating service %s from %s to %s", service.Name, service.Image, newImage)
+		log.Printf("Updating service %s from %s to %s (replicas=%d)", service.Name, service.Image, newImage, service.NumReplicas)
 
 		// Update the service and trigger deployment
-		if err := c.UpdateServiceImage(service.ID, environmentID, newImage); err != nil {
+		if err := c.UpdateServiceImage(service.ID, environmentID, newImage, service.NumReplicas); err != nil {
 			return updatedServices, fmt.Errorf("failed to update service %s: %w", service.Name, err)
 		}
 

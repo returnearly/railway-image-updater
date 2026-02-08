@@ -9,7 +9,7 @@ import (
 )
 
 func TestHandleUpdate_MethodNotAllowed(t *testing.T) {
-	client := NewRailwayClient("test-token")
+	client := NewRailwayClient("test-token", "", "")
 	req := httptest.NewRequest(http.MethodGet, "/update", nil)
 	w := httptest.NewRecorder()
 
@@ -21,7 +21,7 @@ func TestHandleUpdate_MethodNotAllowed(t *testing.T) {
 }
 
 func TestHandleUpdate_InvalidJSON(t *testing.T) {
-	client := NewRailwayClient("test-token")
+	client := NewRailwayClient("test-token", "", "")
 	req := httptest.NewRequest(http.MethodPut, "/update", bytes.NewBufferString("invalid json"))
 	w := httptest.NewRecorder()
 
@@ -42,7 +42,7 @@ func TestHandleUpdate_InvalidJSON(t *testing.T) {
 }
 
 func TestHandleUpdate_InvalidProjectID(t *testing.T) {
-	client := NewRailwayClient("test-token")
+	client := NewRailwayClient("test-token", "", "")
 	reqBody := UpdateRequest{
 		ProjectID:     "invalid-uuid",
 		EnvironmentID: "550e8400-e29b-41d4-a716-446655440000",
@@ -70,7 +70,7 @@ func TestHandleUpdate_InvalidProjectID(t *testing.T) {
 }
 
 func TestHandleUpdate_InvalidEnvironmentID(t *testing.T) {
-	client := NewRailwayClient("test-token")
+	client := NewRailwayClient("test-token", "", "")
 	reqBody := UpdateRequest{
 		ProjectID:     "550e8400-e29b-41d4-a716-446655440000",
 		EnvironmentID: "invalid-uuid",
@@ -98,7 +98,7 @@ func TestHandleUpdate_InvalidEnvironmentID(t *testing.T) {
 }
 
 func TestHandleUpdate_EmptyImagePrefixes(t *testing.T) {
-	client := NewRailwayClient("test-token")
+	client := NewRailwayClient("test-token", "", "")
 	reqBody := UpdateRequest{
 		ProjectID:     "550e8400-e29b-41d4-a716-446655440000",
 		EnvironmentID: "550e8400-e29b-41d4-a716-446655440001",
@@ -126,7 +126,7 @@ func TestHandleUpdate_EmptyImagePrefixes(t *testing.T) {
 }
 
 func TestHandleUpdate_EmptyNewVersion(t *testing.T) {
-	client := NewRailwayClient("test-token")
+	client := NewRailwayClient("test-token", "", "")
 	reqBody := UpdateRequest{
 		ProjectID:     "550e8400-e29b-41d4-a716-446655440000",
 		EnvironmentID: "550e8400-e29b-41d4-a716-446655440001",
@@ -206,6 +206,73 @@ func TestMatchesPrefix(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestResolveReplicaCount(t *testing.T) {
+	tests := []struct {
+		name     string
+		meta     *string
+		expected int
+	}{
+		{
+			name:     "nil deployment",
+			meta:     nil,
+			expected: 1,
+		},
+		{
+			name:     "empty meta",
+			meta:     strPtr(`{}`),
+			expected: 1,
+		},
+		{
+			name:     "meta with replicas in multiRegionConfig",
+			meta:     strPtr(`{"serviceManifest":{"deploy":{"multiRegionConfig":{"us-east4-eqdc4a":{"numReplicas":3}}}}}`),
+			expected: 3,
+		},
+		{
+			name:     "meta with replicas = 1",
+			meta:     strPtr(`{"serviceManifest":{"deploy":{"multiRegionConfig":{"us-east4-eqdc4a":{"numReplicas":1}}}}}`),
+			expected: 1,
+		},
+		{
+			name:     "meta with no multiRegionConfig",
+			meta:     strPtr(`{"serviceManifest":{"deploy":{}}}`),
+			expected: 1,
+		},
+		{
+			name:     "meta with zero replicas defaults to 1",
+			meta:     strPtr(`{"serviceManifest":{"deploy":{"multiRegionConfig":{"us-east4-eqdc4a":{"numReplicas":0}}}}}`),
+			expected: 1,
+		},
+		{
+			name:     "invalid JSON meta",
+			meta:     strPtr(`not-json`),
+			expected: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var deployment *struct {
+				Meta json.RawMessage `json:"meta"`
+			}
+			if tt.meta != nil {
+				deployment = &struct {
+					Meta json.RawMessage `json:"meta"`
+				}{
+					Meta: json.RawMessage(*tt.meta),
+				}
+			}
+			result := resolveReplicaCount("test-service", deployment)
+			if result != tt.expected {
+				t.Errorf("resolveReplicaCount() = %d, expected %d", result, tt.expected)
+			}
+		})
+	}
+}
+
+func strPtr(s string) *string {
+	return &s
 }
 
 func TestHealthEndpoint(t *testing.T) {
