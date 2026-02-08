@@ -13,8 +13,8 @@ import (
 const railwayAPIURL = "https://backboard.railway.app/graphql/v2"
 
 type RailwayClient struct {
-	token                 string
-	httpClient            *http.Client
+	token                  string
+	httpClient             *http.Client
 	registryCredentialUser string
 	registryCredentialPass string
 }
