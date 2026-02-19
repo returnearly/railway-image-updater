@@ -245,6 +245,11 @@ func TestResolveReplicaCount(t *testing.T) {
 			expected: 1,
 		},
 		{
+			name:     "double-encoded JSON meta (stringified)",
+			meta:     strPtr(`"{\"serviceManifest\":{\"deploy\":{\"multiRegionConfig\":{\"us-east4-eqdc4a\":{\"numReplicas\":5}}}}}"`),
+			expected: 5,
+		},
+		{
 			name:     "invalid JSON meta",
 			meta:     strPtr(`not-json`),
 			expected: 1,

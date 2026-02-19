@@ -204,10 +204,20 @@ func resolveReplicaCount(serviceName string, latestDeployment *struct {
 		return replicas
 	}
 
+	// The meta field can be either a JSON object or a stringified JSON string (double-encoded).
+	// Try direct unmarshal first, then handle the double-encoded case.
 	var meta map[string]interface{}
 	if err := json.Unmarshal(latestDeployment.Meta, &meta); err != nil {
-		log.Printf("Failed to parse meta JSON for %s: %v", serviceName, err)
-		return replicas
+		// meta might be a JSON string containing JSON — try double-decoding
+		var metaStr string
+		if strErr := json.Unmarshal(latestDeployment.Meta, &metaStr); strErr != nil {
+			log.Printf("Failed to parse meta JSON for %s: %v", serviceName, err)
+			return replicas
+		}
+		if err2 := json.Unmarshal([]byte(metaStr), &meta); err2 != nil {
+			log.Printf("Failed to double-decode meta JSON for %s: %v", serviceName, err2)
+			return replicas
+		}
 	}
 
 	// Navigate: meta.serviceManifest.deploy.multiRegionConfig.<region>.numReplicas
