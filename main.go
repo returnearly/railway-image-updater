@@ -104,9 +104,21 @@ func handleUpdate(w http.ResponseWriter, r *http.Request, client *RailwayClient)
 		return
 	}
 
+	for _, prefix := range req.ImagePrefixes {
+		if strings.TrimSpace(prefix) == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(ErrorResponse{Error: "image_prefixes entries cannot be empty"})
+			return
+		}
+	}
+
 	if req.NewVersion == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(ErrorResponse{Error: "new_version cannot be empty"})
+		return
+	}
+
+	if !verifyProjectScope(w, client, req.ProjectID, req.EnvironmentID) {
 		return
 	}
 
@@ -168,9 +180,21 @@ func handleDeployCommit(w http.ResponseWriter, r *http.Request, client *RailwayC
 		return
 	}
 
+	for _, prefix := range req.RepoPrefixes {
+		if strings.TrimSpace(prefix) == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(ErrorResponse{Error: "repo_prefixes entries cannot be empty"})
+			return
+		}
+	}
+
 	if req.CommitSha == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(ErrorResponse{Error: "commit_sha cannot be empty"})
+		return
+	}
+
+	if !verifyProjectScope(w, client, req.ProjectID, req.EnvironmentID) {
 		return
 	}
 
@@ -195,6 +219,21 @@ func handleDeployCommit(w http.ResponseWriter, r *http.Request, client *RailwayC
 		Message:         fmt.Sprintf("Successfully deployed %d service(s)", len(updatedServices)),
 		UpdatedServices: updatedServices,
 	})
+}
+
+func verifyProjectScope(w http.ResponseWriter, client *RailwayClient, projectID, environmentID string) bool {
+	actualProjectID, err := client.getProjectID(environmentID)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(ErrorResponse{Error: fmt.Sprintf("Failed to resolve project for environment: %v", err)})
+		return false
+	}
+	if actualProjectID != projectID {
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(ErrorResponse{Error: "project_id does not match the project for the given environment_id"})
+		return false
+	}
+	return true
 }
 
 func matchesPrefix(image string, prefixes []string) bool {

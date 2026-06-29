@@ -153,6 +153,53 @@ func TestHandleUpdate_EmptyNewVersion(t *testing.T) {
 	}
 }
 
+func TestHandleUpdate_EmptyPrefixEntry(t *testing.T) {
+	client := NewRailwayClient("test-token", "", "")
+	reqBody := UpdateRequest{
+		ProjectID:     "550e8400-e29b-41d4-a716-446655440000",
+		EnvironmentID: "550e8400-e29b-41d4-a716-446655440001",
+		ImagePrefixes: []string{"myapp", ""},
+		NewVersion:    "v1.0.0",
+	}
+	jsonData, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPut, "/update", bytes.NewBuffer(jsonData))
+	w := httptest.NewRecorder()
+
+	handleUpdate(w, req, client)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+
+	var resp ErrorResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if resp.Error == "" {
+		t.Error("Expected error message about empty prefix entry")
+	}
+}
+
+func TestHandleUpdate_WhitespacePrefixEntry(t *testing.T) {
+	client := NewRailwayClient("test-token", "", "")
+	reqBody := UpdateRequest{
+		ProjectID:     "550e8400-e29b-41d4-a716-446655440000",
+		EnvironmentID: "550e8400-e29b-41d4-a716-446655440001",
+		ImagePrefixes: []string{"   "},
+		NewVersion:    "v1.0.0",
+	}
+	jsonData, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPut, "/update", bytes.NewBuffer(jsonData))
+	w := httptest.NewRecorder()
+
+	handleUpdate(w, req, client)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+}
+
 func TestHandleDeployCommit_MethodNotAllowed(t *testing.T) {
 	client := NewRailwayClient("test-token", "", "")
 	req := httptest.NewRequest(http.MethodGet, "/deploy-commit", nil)
@@ -295,6 +342,53 @@ func TestHandleDeployCommit_EmptyCommitSha(t *testing.T) {
 
 	if resp.Error == "" {
 		t.Error("Expected error message about empty commit_sha")
+	}
+}
+
+func TestHandleDeployCommit_EmptyPrefixEntry(t *testing.T) {
+	client := NewRailwayClient("test-token", "", "")
+	reqBody := DeployCommitRequest{
+		ProjectID:     "550e8400-e29b-41d4-a716-446655440000",
+		EnvironmentID: "550e8400-e29b-41d4-a716-446655440001",
+		RepoPrefixes:  []string{"myorg/myrepo", ""},
+		CommitSha:     "abc123",
+	}
+	jsonData, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPut, "/deploy-commit", bytes.NewBuffer(jsonData))
+	w := httptest.NewRecorder()
+
+	handleDeployCommit(w, req, client)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+
+	var resp ErrorResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if resp.Error == "" {
+		t.Error("Expected error message about empty prefix entry")
+	}
+}
+
+func TestHandleDeployCommit_WhitespacePrefixEntry(t *testing.T) {
+	client := NewRailwayClient("test-token", "", "")
+	reqBody := DeployCommitRequest{
+		ProjectID:     "550e8400-e29b-41d4-a716-446655440000",
+		EnvironmentID: "550e8400-e29b-41d4-a716-446655440001",
+		RepoPrefixes:  []string{"   "},
+		CommitSha:     "abc123",
+	}
+	jsonData, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPut, "/deploy-commit", bytes.NewBuffer(jsonData))
+	w := httptest.NewRecorder()
+
+	handleDeployCommit(w, req, client)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, w.Code)
 	}
 }
 
