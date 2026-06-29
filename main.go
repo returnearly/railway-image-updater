@@ -18,6 +18,13 @@ type UpdateRequest struct {
 	NewVersion    string   `json:"new_version"`
 }
 
+type DeployCommitRequest struct {
+	ProjectID     string   `json:"project_id"`
+	EnvironmentID string   `json:"environment_id"`
+	RepoPrefixes  []string `json:"repo_prefixes"`
+	CommitSha     string   `json:"commit_sha"`
+}
+
 type ErrorResponse struct {
 	Error string `json:"error"`
 }
@@ -40,6 +47,10 @@ func main() {
 
 	http.HandleFunc("/update", func(w http.ResponseWriter, r *http.Request) {
 		handleUpdate(w, r, client)
+	})
+
+	http.HandleFunc("/deploy-commit", func(w http.ResponseWriter, r *http.Request) {
+		handleDeployCommit(w, r, client)
 	})
 
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -119,6 +130,69 @@ func handleUpdate(w http.ResponseWriter, r *http.Request, client *RailwayClient)
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(SuccessResponse{
 		Message:         fmt.Sprintf("Successfully updated %d service(s)", len(updatedServices)),
+		UpdatedServices: updatedServices,
+	})
+}
+
+func handleDeployCommit(w http.ResponseWriter, r *http.Request, client *RailwayClient) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPut {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(ErrorResponse{Error: "Method not allowed, use PUT"})
+		return
+	}
+
+	var req DeployCommitRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(ErrorResponse{Error: fmt.Sprintf("Invalid JSON: %v", err)})
+		return
+	}
+
+	if _, err := uuid.Parse(req.ProjectID); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(ErrorResponse{Error: "Invalid project_id: must be a valid UUID"})
+		return
+	}
+
+	if _, err := uuid.Parse(req.EnvironmentID); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(ErrorResponse{Error: "Invalid environment_id: must be a valid UUID"})
+		return
+	}
+
+	if len(req.RepoPrefixes) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(ErrorResponse{Error: "repo_prefixes cannot be empty"})
+		return
+	}
+
+	if req.CommitSha == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(ErrorResponse{Error: "commit_sha cannot be empty"})
+		return
+	}
+
+	updatedServices, err := client.DeployServicesByCommit(req.EnvironmentID, req.RepoPrefixes, req.CommitSha)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(ErrorResponse{Error: fmt.Sprintf("Failed to deploy services: %v", err)})
+		return
+	}
+
+	if len(updatedServices) == 0 {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(SuccessResponse{
+			Message:         "No services matched the provided repo prefixes",
+			UpdatedServices: []string{},
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(SuccessResponse{
+		Message:         fmt.Sprintf("Successfully deployed %d service(s)", len(updatedServices)),
 		UpdatedServices: updatedServices,
 	})
 }

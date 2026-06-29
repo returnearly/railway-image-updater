@@ -82,6 +82,52 @@ The server will start on port 8080 by default.
 }
 ```
 
+#### Deploy by Commit
+
+**Endpoint:** `PUT /deploy-commit`
+
+Redeploys repo-backed Railway services at a specific commit SHA. Matches services by `source.repo` prefix and calls Railway's `serviceInstanceDeployV2` mutation. Use this for services connected to a GitHub repo, where you want to pin the deploy to an exact commit (e.g. from CI after a build is verified).
+
+**Request Body:**
+
+```json
+{
+  "project_id": "550e8400-e29b-41d4-a716-446655440000",
+  "environment_id": "550e8400-e29b-41d4-a716-446655440001",
+  "repo_prefixes": ["myorg/myrepo"],
+  "commit_sha": "abc1234567890abcdef1234567890abcdef12345"
+}
+```
+
+**Parameters:**
+
+- `project_id` (string, required): Railway project UUID
+- `environment_id` (string, required): Railway environment UUID
+- `repo_prefixes` (array of strings, required): List of `source.repo` prefixes (e.g. `myorg/myrepo`)
+- `commit_sha` (string, required): Git commit SHA to deploy
+
+**Success Response (200 OK):**
+
+```json
+{
+  "message": "Successfully deployed 1 service(s)",
+  "updated_services": ["api-service"]
+}
+```
+
+**Example:**
+
+```bash
+curl -X PUT http://localhost:8080/deploy-commit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "project_id": "550e8400-e29b-41d4-a716-446655440000",
+    "environment_id": "550e8400-e29b-41d4-a716-446655440001",
+    "repo_prefixes": ["myorg/myrepo"],
+    "commit_sha": "abc1234567890abcdef1234567890abcdef12345"
+  }'
+```
+
 #### Health Check
 
 **Endpoint:** `GET /health`

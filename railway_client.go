@@ -35,6 +35,7 @@ type Service struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Image       string `json:"image"`
+	Repo        string `json:"repo"`
 	NumReplicas int    `json:"numReplicas"`
 }
 
@@ -177,15 +178,17 @@ func (c *RailwayClient) GetServices(environmentID string) ([]Service, error) {
 
 	services := make([]Service, 0)
 	for _, edge := range result.Environment.ServiceInstances.Edges {
-		if edge.Node.Source.Image != "" {
-			replicas := resolveReplicaCount(edge.Node.ServiceName, edge.Node.LatestDeployment)
-			services = append(services, Service{
-				ID:          edge.Node.ServiceID,
-				Name:        edge.Node.ServiceName,
-				Image:       edge.Node.Source.Image,
-				NumReplicas: replicas,
-			})
+		if edge.Node.Source.Image == "" && edge.Node.Source.Repo == "" {
+			continue
 		}
+		replicas := resolveReplicaCount(edge.Node.ServiceName, edge.Node.LatestDeployment)
+		services = append(services, Service{
+			ID:          edge.Node.ServiceID,
+			Name:        edge.Node.ServiceName,
+			Image:       edge.Node.Source.Image,
+			Repo:        edge.Node.Source.Repo,
+			NumReplicas: replicas,
+		})
 	}
 
 	return services, nil
@@ -340,6 +343,63 @@ func (c *RailwayClient) getProjectID(environmentID string) (string, error) {
 	}
 
 	return result.Environment.ProjectID, nil
+}
+
+func (c *RailwayClient) DeployServiceCommit(serviceID, environmentID, commitSha string) error {
+	query := `
+		mutation ServiceInstanceDeployV2($serviceId: String!, $environmentId: String!, $commitSha: String!) {
+			serviceInstanceDeployV2(serviceId: $serviceId, environmentId: $environmentId, commitSha: $commitSha)
+		}
+	`
+
+	variables := map[string]interface{}{
+		"serviceId":     serviceID,
+		"environmentId": environmentID,
+		"commitSha":     commitSha,
+	}
+
+	if _, err := c.doRequest(query, variables); err != nil {
+		return fmt.Errorf("failed to deploy service instance at commit: %w", err)
+	}
+
+	return nil
+}
+
+func (c *RailwayClient) DeployServicesByCommit(environmentID string, repoPrefixes []string, commitSha string) ([]string, error) {
+	services, err := c.GetServices(environmentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get services: %w", err)
+	}
+
+	updatedServices := make([]string, 0)
+
+	for _, service := range services {
+		if service.Repo == "" {
+			continue
+		}
+
+		matched := false
+		for _, prefix := range repoPrefixes {
+			if strings.HasPrefix(service.Repo, prefix) {
+				matched = true
+				break
+			}
+		}
+
+		if !matched {
+			continue
+		}
+
+		log.Printf("Deploying service %s (repo=%s) at commit %s", service.Name, service.Repo, commitSha)
+
+		if err := c.DeployServiceCommit(service.ID, environmentID, commitSha); err != nil {
+			return updatedServices, fmt.Errorf("failed to deploy service %s: %w", service.Name, err)
+		}
+
+		updatedServices = append(updatedServices, service.Name)
+	}
+
+	return updatedServices, nil
 }
 
 func (c *RailwayClient) UpdateServices(environmentID string, imagePrefixes []string, newVersion string) ([]string, error) {

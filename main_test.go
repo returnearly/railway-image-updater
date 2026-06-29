@@ -153,6 +153,151 @@ func TestHandleUpdate_EmptyNewVersion(t *testing.T) {
 	}
 }
 
+func TestHandleDeployCommit_MethodNotAllowed(t *testing.T) {
+	client := NewRailwayClient("test-token", "", "")
+	req := httptest.NewRequest(http.MethodGet, "/deploy-commit", nil)
+	w := httptest.NewRecorder()
+
+	handleDeployCommit(w, req, client)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("Expected status %d, got %d", http.StatusMethodNotAllowed, w.Code)
+	}
+}
+
+func TestHandleDeployCommit_InvalidJSON(t *testing.T) {
+	client := NewRailwayClient("test-token", "", "")
+	req := httptest.NewRequest(http.MethodPut, "/deploy-commit", bytes.NewBufferString("invalid json"))
+	w := httptest.NewRecorder()
+
+	handleDeployCommit(w, req, client)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+
+	var resp ErrorResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if resp.Error == "" {
+		t.Error("Expected error message")
+	}
+}
+
+func TestHandleDeployCommit_InvalidProjectID(t *testing.T) {
+	client := NewRailwayClient("test-token", "", "")
+	reqBody := DeployCommitRequest{
+		ProjectID:     "invalid-uuid",
+		EnvironmentID: "550e8400-e29b-41d4-a716-446655440000",
+		RepoPrefixes:  []string{"myorg/myrepo"},
+		CommitSha:     "abc123",
+	}
+	jsonData, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPut, "/deploy-commit", bytes.NewBuffer(jsonData))
+	w := httptest.NewRecorder()
+
+	handleDeployCommit(w, req, client)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+
+	var resp ErrorResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if resp.Error == "" {
+		t.Error("Expected error message about invalid project_id")
+	}
+}
+
+func TestHandleDeployCommit_InvalidEnvironmentID(t *testing.T) {
+	client := NewRailwayClient("test-token", "", "")
+	reqBody := DeployCommitRequest{
+		ProjectID:     "550e8400-e29b-41d4-a716-446655440000",
+		EnvironmentID: "invalid-uuid",
+		RepoPrefixes:  []string{"myorg/myrepo"},
+		CommitSha:     "abc123",
+	}
+	jsonData, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPut, "/deploy-commit", bytes.NewBuffer(jsonData))
+	w := httptest.NewRecorder()
+
+	handleDeployCommit(w, req, client)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+
+	var resp ErrorResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if resp.Error == "" {
+		t.Error("Expected error message about invalid environment_id")
+	}
+}
+
+func TestHandleDeployCommit_EmptyRepoPrefixes(t *testing.T) {
+	client := NewRailwayClient("test-token", "", "")
+	reqBody := DeployCommitRequest{
+		ProjectID:     "550e8400-e29b-41d4-a716-446655440000",
+		EnvironmentID: "550e8400-e29b-41d4-a716-446655440001",
+		RepoPrefixes:  []string{},
+		CommitSha:     "abc123",
+	}
+	jsonData, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPut, "/deploy-commit", bytes.NewBuffer(jsonData))
+	w := httptest.NewRecorder()
+
+	handleDeployCommit(w, req, client)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+
+	var resp ErrorResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if resp.Error == "" {
+		t.Error("Expected error message about empty repo_prefixes")
+	}
+}
+
+func TestHandleDeployCommit_EmptyCommitSha(t *testing.T) {
+	client := NewRailwayClient("test-token", "", "")
+	reqBody := DeployCommitRequest{
+		ProjectID:     "550e8400-e29b-41d4-a716-446655440000",
+		EnvironmentID: "550e8400-e29b-41d4-a716-446655440001",
+		RepoPrefixes:  []string{"myorg/myrepo"},
+		CommitSha:     "",
+	}
+	jsonData, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPut, "/deploy-commit", bytes.NewBuffer(jsonData))
+	w := httptest.NewRecorder()
+
+	handleDeployCommit(w, req, client)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+
+	var resp ErrorResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if resp.Error == "" {
+		t.Error("Expected error message about empty commit_sha")
+	}
+}
+
 func TestMatchesPrefix(t *testing.T) {
 	tests := []struct {
 		name     string
